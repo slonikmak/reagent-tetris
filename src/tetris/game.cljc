@@ -2,7 +2,6 @@
   (:require [tetris.shapes :as s]
             [tetris.field :as field]))
 
-(def game-speed 400)
 
 (def width 300)
 (def height 600)
@@ -11,10 +10,17 @@
 (def h-count 20)
 
 (def v-spacing (/ width v-count))
-(def h-spacing (/ height h-count))
 
 (defn get-coords [state]
   (s/get-coords (:shape state)))
+
+(def levels-speed
+  [400 350 300 250 200 150 100])
+
+(def scores-threshold 200)
+
+(defn next-level? [score current-level]
+  (<= scores-threshold (/ score current-level)))
 
 (defn init []
   {:shape      (s/get-random-shape)
@@ -22,7 +28,9 @@
    :game-over  false
    :running    true
    :next-shape (s/get-random-shape)
-   :actions    #{}})
+   :actions    #{}
+   :level 1
+   :game-speed (first levels-speed)})
 
 (defn out-of-bounds? [field [x y]]
   (let [rows (count field)
@@ -106,3 +114,8 @@
 (defn calc-score [cleared-lines]
   (let [coef (if (> cleared-lines 1) (* cleared-lines 1.5) cleared-lines)]
     (* coef v-count)))
+
+(defn increment-level [n]
+  (if (< n (count levels-speed))
+    (inc n)
+    n))
