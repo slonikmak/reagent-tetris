@@ -4,7 +4,9 @@
             [tetris.shapes :as shape]
             [tetris.field :as field]
             [tetris.scores-modal :as m]
-            [tetris.local-repository :as repo]
+            [tetris.user-modal :as um]
+            [tetris.local-repository :as local-repo]
+            [tetris.firebase-repository :as firebase-repo]
             [cljs.core.async :refer [chan <! >! go-loop go timeout close!]]
             ["react-dom/client" :refer [createRoot]]))
 
@@ -12,6 +14,7 @@
 (def cell-size (str g/v-spacing "px"))
 
 (defonce *state (r/atom nil))
+(defonce *app-state (r/atom {:current-user (local-repo/get-user)}))
 
 (defn key->action [key]
   (case key
@@ -24,7 +27,6 @@
 (defn keydown-handler [events]
   (fn [e]
     (when-let [action (key->action (.-key e))]
-      (println "Key pressed:" action)
       (go (>! events action)))))
 
 (defn calc-level-speed [state]
@@ -43,6 +45,11 @@
           (assoc :field (:field new-field))
           (update :score + (g/calc-score (:cleaned-count new-field)))))))
 
+(defn update-scores! [new-entry]
+  (if (:current-user @*app-state)
+    (firebase-repo/update-scores! new-entry)
+    (local-repo/update-scores! new-entry)))
+
 (defn start-game []
   (println "Start the game")
   (let [events (chan 1)
@@ -52,8 +59,9 @@
                   (.removeEventListener js/window "keydown" key-handler)
                   (close! events)
                   (when (> (:score @*state) 0)
-                    (let [scores-data (repo/save-scores {:date (.toISOString (js/Date.)) :score (:score @*state) :level (:level @*state)})]
-                      (swap! *state assoc :scores-data scores-data :show-modal true :scores (repo/get-scores)))))]
+                    (go
+                      (let [scores-data (<! (update-scores! {:date (.toISOString (js/Date.)) :score (:score @*state) :level (:level @*state) :user (:current-user @*app-state)}))]
+                        (swap! *state assoc :score-data scores-data :show-modal true)))))]
 
     (.addEventListener js/window "keydown" key-handler)
 
@@ -119,14 +127,17 @@
   (let [score @(r/track #(:level @*state))]
     [:div "Level: " score]))
 
+(defn user-name-component []
+  [:div#username "User name"])
+
 ;; Update game-component to use game state for modal
 (defn game-component []
   (let [stop-fn (r/atom nil)]
     (fn []
-      [:div {:style {:display         "flex"
-                     :flex-direction  "column"
-                     :justify-content "center"
-                     :align-items     "center"}}
+      [:div.container {:style {:display         "flex"
+                               :flex-direction  "column"
+                               :justify-content "center"
+                               :align-items     "center"}}
        [:div {:style {:display "flex" :padding cell-size :gap "20px"}}
         [game-grid]
         [:div {:style {:display        "flex"
@@ -134,21 +145,22 @@
                        :align-items    "center"
                        :gap            "10px"}}
          [next-piece-grid]
+         [um/user-name-component *app-state]
          [level-view]
          [score-view]
-         [:button {:id       "start-btn"
-                   :on-click (fn [e]
-                               (reset! stop-fn (start-game))
-                               (.blur (.-target e)))} "Start"]
-         [:button {:id       "stop-btn"
-                   :on-click #(when @stop-fn (@stop-fn))} "Stop"]
+         [:button.button {:id       "start-btn"
+                          :on-click (fn [e]
+                                      (reset! stop-fn (start-game))
+                                      (.blur (.-target e)))} "Start"]
+         [:button.button {:id       "stop-btn"
+                          :on-click #(when @stop-fn (@stop-fn))} "Stop"]
          [:div {:id    "game-over"
                 :style {:color      "red"
                         :font-size  "18"
                         :margin-top "10px"
                         :display    (if (:game-over @*state) "block" "none")}}
           "Game over!"]]
-        [m/modal (:show-modal @*state) (:scores-data @*state)]]])))
+        [m/modal (:show-modal @*state) (:score-data @*state)]]])))
 
 
 (defonce root (createRoot (.getElementById js/document "app")))
